@@ -1,0 +1,56 @@
+# Deduper Pseudocode
+
+# Create a set variable to store unique lists. Each list stores specific information for a potential PCR duplicate.
+	> reads_set = set()
+
+# Find Position Function
+	> def find_position(cigar_string)
+		> Description: Looks at the cigar string input for soft clipping and readjusts the chromosome position.
+		> Input: Cigar String
+		> Returns adjusted position
+
+# This function checks for a PCR duplicate
+	> def is_duplicate(read_list)
+		> Description: Looks at the read_list to see if it is in the seen set.
+		> Input: A list containing pertinent information to determine PCR duplicate.
+		> if read_list is in reads_set, return True.
+		> if read_list is not in reads_set, return False, and add the read_list into the set.
+
+# Read in UMI file into a list of 96 strings
+UMI_list = read in STL96.txt
+
+# Iterate over each line of the SAM file and extract the necessary information to determine PCR duplicates.
+> file = open the SAM file
+> Iterate through each line of the SAM file to determine PCR duplicates
+	> Retrieve UMI information
+
+	> If the UMI information doesn't match the 96 UMIs within the UMI_list, skip to the next read, and write the read into UMI_error.txt.
+
+	> Otherwise, parse the reads and store PCR duplicate information into variables.
+		> chromosome = column 3 of the line
+		> position = column 4 of the line
+		> strand = column 2 of the line
+		> cigar_string = column 6 of the line
+
+	> If soft clipping occured, readjust the position of the read.
+	> The new position is the readjusted position returned by the find_position function.
+		> position = find_position(cigar_string)
+	
+	# Store the PCR duplicate information for this read into a list.
+		> read_list = [chromosome, position, strand, cigar_string]
+
+	# Check to see if the PCR duplicate information in this read already exists in the set.
+		> if is_duplicate(read_list) returns True
+			> add the current read line into duplicates.txt
+		> if is_duplicate(read_list) returns False
+			> add the current read line into SAM.txt
+
+
+
+
+	
+
+
+
+
+
