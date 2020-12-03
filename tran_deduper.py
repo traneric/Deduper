@@ -2,35 +2,25 @@
 import re
 import argparse
 
-# Create parser object.
-parser = argparse.ArgumentParser(description='Given a SAM file of uniquely \
-    mapped reads, this program removes all PCR duplicates (retain only a single \
-    copy of each read). The SAM file must be sorted by chromosome number \
-    prior to running the program. The program will output the unique reads, \
-    PCR duplicate reads, and mismatched index reads in three files: \
-    deduped.sam, duplicates.sam, and misindexed.sam')
+def argument_parser():
+    '''Return parser object.'''
+    # Create parser object.
+    parser = argparse.ArgumentParser(description='Given a SAM file of uniquely \
+        mapped reads, this program removes all PCR duplicates (retain only a single \
+        copy of each read). The SAM file must be sorted by chromosome number \
+        prior to running the program. The program will output the unique reads, \
+        PCR duplicate reads, and mismatched index reads in three files: \
+        deduped.sam, duplicates.sam, and misindexed.sam')
 
-# Create flags for SAM file, paired-end option, and UMI file.
-parser.add_argument('-f', '--file', type=str, required=True, help='Absolute file path \
-    for SAM file')
-parser.add_argument('-p', '--paired', action='store_true', help='Designates file is paired end')
-parser.add_argument('-u', '--umi', type=str, required=False, help='Designates file \
-    containing the list of UMIs (unset if randomers instead of UMIs)')
-args = parser.parse_args()
+    # Create flags for SAM file, paired-end option, and UMI file.
+    parser.add_argument('-f', '--file', type=str, required=True, help='Absolute file path \
+        for SAM file')
+    parser.add_argument('-p', '--paired', action='store_true', help='Designates file is paired end')
+    parser.add_argument('-u', '--umi', type=str, required=False, help='Designates file \
+        containing the list of UMIs (unset if randomers instead of UMIs)')
+    return parser.parse_args()
 
-# Variables to store command-line inputs.
-absolute_file_path = args.file
-paired_end = args.paired
-umi_file_path = args.umi
-
-# Raise exception if the user specifies paired-end.
-if paired_end:
-    raise Exception("This program does not support paired end functionality. The program will now exit. Please try again without the -p (paired-end) option.")
-
-# Generate a list of the 96 unique molecular indices.
-umi_list = open('STL96.txt').read().split('\n')
-
-def is_unique_umi(umi):
+def is_unique_umi(umi, umi_list):
     '''This function returns True if the read has a unique UMI. Otherwise 
     it returns False.'''
     if umi in umi_list:
@@ -107,12 +97,12 @@ def adjust_start_position(read, start_position, reverse_complement):
 
     cigar_string = get_cigar_string(read)
     soft_clipped = is_soft_clipped(cigar_string)
+    adjusted_start_position = start_position
 
     if reverse_complement == False and soft_clipped:
         # Subtract soft clipping from the forward read original position.
         soft_clipped_value = int((re.search("(\d+)S", cigar_string).group())[:-1])
         adjusted_start_position = start_position - soft_clipped_value
-        return adjusted_start_position
     elif reverse_complement == True:
         # The read is a reverse complement.
         # Add matches, deletions, skips. Substract end soft clipping.
@@ -132,79 +122,96 @@ def adjust_start_position(read, start_position, reverse_complement):
             if cigar_string[-1] == 'S':
                 soft_clipped_value = list(map(int, re.findall("(\d+)S", cigar_string)))[-1]
         adjusted_start_position = start_position + matched_value + deleted_value + skipped_value + soft_clipped_value
-        return adjusted_start_position
-    else: 
-        # Forward read has no soft clipping. Return original position.
-        return start_position
+    return adjusted_start_position
 
-def display_final_results():
+def display_final_results(misindexed, duplicate, unique):
     '''This function displays the number of unique reads, duplicate reads, and
     misindexed reads.'''
-    print("Misindexed reads: " + str(misindexed_read_count))
-    print("Duplicate reads: " + str(duplicate_read_count))
-    print("Unique reads: " + str(unique_read_count))
+    print("Misindexed reads: " + str(misindexed))
+    print("Duplicate reads: " + str(duplicate))
+    print("Unique reads: " + str(unique))
 
-# This list retains only a single copy of each read.
-non_pcr_duplicate_set = set()
+def close_files(samFile, outputSamFile, duplicateFile, misindexedFile):
+    '''This function closes all files.'''
+    samFile.close()
+    outputSamFile.close()
+    duplicateFile.close()
+    misindexedFile.close()
 
-# Variables to track misindexed, duplicate, unique reads, and previous chromosome number.
-misindexed_read_count = 0
-duplicate_read_count = 0
-unique_read_count = 0
-previous_chromosome_number = "undeclared"
+def main():
+    '''This is the main function.'''
+    # Retrieve parser object.
+    args = argument_parser()
 
-# Open Sam file, unique read file, duplicate file, and misindexed file.
-samFile = open(absolute_file_path, 'r')
-outputSamFile = open('deduped.sam', 'w')
-duplicateFile = open('duplicates.sam', 'w')
-misindexedFile = open('misindexed.sam', 'w')
+    # Variables to store command-line inputs.
+    absolute_file_path = args.file
+    paired_end = args.paired
+    umi_file_path = args.umi
 
-# Process the file.
-for line in samFile:
+    # Raise exception if the user specifies paired-end.
+    if paired_end:
+        raise Exception("This program does not support paired end functionality. The program will now exit. Please try again without the -p (paired-end) option.")
 
-    read = line.strip()
+    # Generate a list of the 96 unique molecular indices.
+    umi_list = open('STL96.txt').read().split('\n')
 
-    # Get UMI for the current read.
-    umi = get_umi(read)
+    # This list retains only a single copy of each read.
+    non_pcr_duplicate_set = set()
 
-    # Continue to the next read if umi is not one of 96 unique UMI.
-    if is_unique_umi(umi) == False:
-        misindexed_read_count += 1
-        continue
+    # Variables to track misindexed, duplicate, unique reads, and previous chromosome number.
+    misindexed_read_count = 0
+    duplicate_read_count = 0
+    unique_read_count = 0
+    previous_chromosome_number = "undeclared"
 
-    # Get variables to determine PCR duplicates.
-    chromosome_number = get_chromosome_number(read)
-    start_position = get_start_position(read)
-    reverse_complement = is_reverse_complement(read)
-    soft_clipped = is_soft_clipped(get_cigar_string(read))
+    # Open all the files.
+    samFile = open(absolute_file_path, 'r')
+    outputSamFile = open('deduped.sam', 'w')
+    duplicateFile = open('duplicates.sam', 'w')
+    misindexedFile = open('misindexed.sam', 'w')
 
-    # Check if the tuple set needs to be purged.
-    if previous_chromosome_number == "undeclared":
-        previous_chromosome_number = chromosome_number
-    elif chromosome_number != previous_chromosome_number:
-        previous_chromosome_number = chromosome_number
-        non_pcr_duplicate_set.clear()
-    
-    # Adjust the start position of the read.
-    start_position = adjust_start_position(read, start_position, reverse_complement)
+    # Process the file.
+    for line in samFile:
+        read = line.strip()
 
-    # Store the current read information into a tuple.
-    read_tuple = (umi, chromosome_number, start_position, reverse_complement)
+        # Get UMI for the current read.
+        umi = get_umi(read)
 
-    # Check for PCR duplicate and append tuple to list if the read is not a duplicate.
-    if read_tuple not in non_pcr_duplicate_set:
-        non_pcr_duplicate_set.add(read_tuple)
-        outputSamFile.write(read + '\n')
-        unique_read_count += 1
-    else:
-        duplicateFile.write(read + '\n')
-        duplicate_read_count += 1
+        # Continue to the next read if umi is not one of 96 unique UMI.
+        if is_unique_umi(umi, umi_list) == False:
+            misindexed_read_count += 1
+            continue
 
-# Close all files.
-samFile.close()
-outputSamFile.close()
-duplicateFile.close()
-misindexedFile.close()
+        # Get variables to determine PCR duplicates.
+        chromosome_number = get_chromosome_number(read)
+        start_position = get_start_position(read)
+        reverse_complement = is_reverse_complement(read)
+        soft_clipped = is_soft_clipped(get_cigar_string(read))
 
-# Display final results.
-display_final_results()
+        # Check if the tuple set needs to be purged.
+        if previous_chromosome_number == "undeclared":
+            previous_chromosome_number = chromosome_number
+        elif chromosome_number != previous_chromosome_number:
+            previous_chromosome_number = chromosome_number
+            non_pcr_duplicate_set.clear()
+        
+        # Adjust the start position of the read.
+        start_position = adjust_start_position(read, start_position, reverse_complement)
+
+        # Store the current read information into a tuple.
+        read_tuple = (umi, chromosome_number, start_position, reverse_complement)
+
+        # Check for PCR duplicate and append tuple to list if the read is not a duplicate.
+        if read_tuple not in non_pcr_duplicate_set:
+            non_pcr_duplicate_set.add(read_tuple)
+            outputSamFile.write(read + '\n')
+            unique_read_count += 1
+        else:
+            duplicateFile.write(read + '\n')
+            duplicate_read_count += 1
+
+    close_files(samFile, outputSamFile, duplicateFile, misindexedFile)
+    display_final_results(misindexed_read_count, duplicate_read_count, unique_read_count)
+
+# Run program
+main()
